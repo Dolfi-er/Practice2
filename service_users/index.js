@@ -1,12 +1,22 @@
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
+const Joi = require('joi');
+
 
 const app = express();
 const PORT = process.env.PORT || 8000;
+const JWT_SECRET = process.env.JWT_SECRET || 'secret-key';
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Имитация базы данных в памяти (LocalStorage)
+let fakeUsersDb = {};
+let currentId = 1;
 
 //Схемы
 const registerSchema = Joi.object({
@@ -25,9 +35,36 @@ const updateProfileSchema = Joi.object({
     email: Joi.string().email().required()
 });
 
-// Имитация базы данных в памяти (LocalStorage)
-let fakeUsersDb = {};
-let currentId = 1;
+//Authm middleware
+const authMiddleware = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({error: 'Unauthorized'});
+    }
+
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) {
+            return res.status(403).json({error: 'Invalid token'});
+        }
+        req.user = user;
+        next();
+    });
+};
+
+//Utils
+const generateToken = (user) => {
+    return jwt.sign(
+        {
+            userId: user.id,
+            email: user.email,
+            roles: user.roles
+        },
+        JWT_SECRET,
+        {expiresIn: '2h'}
+    );
+};
 
 // Routes
 app.get('/users', (req, res) => {
