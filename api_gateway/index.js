@@ -189,6 +189,47 @@ app.get('/orders/health', async (req, res) => {
     }
 });
 
+app.post('/users/register', async (req, res) => {
+  try {
+    const user = await usersCircuit.fire(`${USERS_SERVICE_URL}/users/register`, {
+      method: 'POST',
+      data: req.body
+    });
+    res.status(201).json(user);
+  } catch (error) {
+    res.status(500).json({error: 'Internal server error'});
+  }
+});
+
+// Вход
+app.post('/users/login', async (req, res) => {
+  try {
+    const result = await usersCircuit.fire(`${USERS_SERVICE_URL}/users/login`, {
+      method: 'POST',
+      data: req.body
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({error: 'Internal server error'});
+  }
+});
+
+// Получение профиля (требует аутентификации)
+app.get('/users/me', async (req, res) => {
+  try {
+    // Нужно передавать заголовок Authorization
+    const user = await usersCircuit.fire(`${USERS_SERVICE_URL}/users/me`, {
+      method: 'GET',
+      headers: {
+        'Authorization': req.headers['authorization']
+      }
+    });
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({error: 'Internal server error'});
+  }
+});
+
 // Gateway Aggregation: Get user details with their orders
 app.get('/users/:userId/details', async (req, res) => {
     try {
