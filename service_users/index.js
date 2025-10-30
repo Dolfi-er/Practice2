@@ -83,7 +83,7 @@ const comparePassword = async (password, hash) => {
 // Routes
 
 //Register
-app.post('/register', async (req, res) => {
+app.post('/users/register', async (req, res) => {
     try{
         //Data validation
         const {error, value} = registerSchema.validate(req.body);
@@ -143,7 +143,7 @@ app.post('/register', async (req, res) => {
 });
 
 //Login
-app.post('/login', async (req, res) => {
+app.post('/users/login', async (req, res) => {
   try {
     //Data validation
     const { error, value } = loginSchema.validate(req.body);
@@ -194,6 +194,26 @@ app.post('/login', async (req, res) => {
     });
   }
 });
+
+//Get profile
+app.get('/users/me', authenticateToken, (req, res) => {
+  try {
+    const user = users.find(user => user.id === req.user.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const { passwordHash, ...userWithoutPassword } = user;
+    res.json(userWithoutPassword);
+
+  } catch (error) {
+    console.error('Profile error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
 
 app.get('/users', (req, res) => {
     const users = Object.values(fakeUsersDb);
