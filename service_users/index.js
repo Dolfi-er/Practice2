@@ -212,68 +212,140 @@ app.get('/users/me', authenticateToken, (req, res) => {
   }
 });
 
+// PUT profile
+app.put('/users/profile', authenticateToken, async (req, res) => {
+  try {
+    // Валидация входных данных
+    const { error, value } = updateProfileSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: error.details.map(d => d.message) 
+      });
+    }
 
+    const userIndex = users.findIndex(user => user.id === req.user.userId);
+    if (userIndex === -1) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
+    // Обновление полей
+    users[userIndex] = {
+      ...users[userIndex],
+      ...value,
+      updatedAt: new Date().toISOString()
+    };
 
-app.get('/users', (req, res) => {
-    const users = Object.values(fakeUsersDb);
-    res.json(users);
+    const { passwordHash, ...updatedUser } = users[userIndex];
+    
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: updatedUser
+    });
+
+  } catch (error) {
+    console.error('Profile update error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-app.get('/users/health', (req, res) => {
-    res.json({
-        status: 'OK',
-        service: 'Users Service',
-        timestamp: new Date().toISOString()
+app.get('/users', authenticateToken, requireAdmin, (req, res) => {
+  try {
+    // Pagination + filters params
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const emailFilter = req.query.email;
+    const roleFilter = req.query.role;
+
+    // Filtering
+    let filteredUsers = [...users];
+    
+    if (emailFilter) {
+      filteredUsers = filteredUsers.filter(user => 
+        user.email.toLowerCase().includes(emailFilter.toLowerCase())
+      );
+    }
+    
+    if (roleFilter) {
+      filteredUsers = filteredUsers.filter(user => 
+        user.roles.includes(roleFilter)
+      );
+    }
+
+    // Pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+    
+    const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
+    
+    // No passwords in response
+    const usersWithoutPasswords = paginatedUsers.map(user => {
+      const { passwordHash, ...userWithoutPassword } = user;
+      return userWithoutPassword;
     });
+
+    res.json({
+      success: true,
+      users: usersWithoutPasswords,
+      pagination: {
+        page,
+        limit,
+        total: filteredUsers.length,
+        totalPages: Math.ceil(filteredUsers.length / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Users list error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Health check
+app.get('/users/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    service: 'Users Service',
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.get('/users/status', (req, res) => {
-    res.json({status: 'Users service is running'});
+  res.json({ status: 'Users service is running' });
 });
 
+// Получение пользователя по ID (для API Gateway)
 app.get('/users/:userId', (req, res) => {
-    const userId = parseInt(req.params.userId);
-    const user = fakeUsersDb[userId];
+  const user = users.find(user => user.id === req.params.userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
 
-    if (!user) {
-        return res.status(404).json({error: 'User not found'});
-    }
-
-    res.json(user);
+  const { passwordHash, ...userWithoutPassword } = user;
+  res.json(userWithoutPassword);
 });
 
-app.put('/users/:userId', (req, res) => {
-    const userId = parseInt(req.params.userId);
-    const updates = req.body;
-
-    if (!fakeUsersDb[userId]) {
-        return res.status(404).json({error: 'User not found'});
-    }
-
-    const updatedUser = {
-        ...fakeUsersDb[userId],
-        ...updates
+// Test admin creation
+const createTestAdmin = async () => {
+  const adminExists = users.find(user => user.roles.includes('admin'));
+  if (!adminExists) {
+    const adminUser = {
+      id: uuidv4(),
+      email: 'admin@test.com',
+      passwordHash: await hashPassword('admin123'),
+      name: 'System Administrator',
+      roles: ['admin', 'user'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
-
-    fakeUsersDb[userId] = updatedUser;
-    res.json(updatedUser);
-});
-
-app.delete('/users/:userId', (req, res) => {
-    const userId = parseInt(req.params.userId);
-
-    if (!fakeUsersDb[userId]) {
-        return res.status(404).json({error: 'User not found'});
-    }
-
-    const deletedUser = fakeUsersDb[userId];
-    delete fakeUsersDb[userId];
-
-    res.json({message: 'User deleted', deletedUser});
-});
+    users.push(adminUser);
+    console.log('Test admin created: admin@test.com / admin123');
+  }
+};
 
 // Start server
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Users service running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', async () => {
+  await createTestAdmin();
+  console.log(`Users service running on port ${PORT}`);
 });
