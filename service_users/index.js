@@ -10,13 +10,16 @@ const app = express();
 const PORT = process.env.PORT || 8000;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret-key';
 
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 
+
 // Имитация базы данных в памяти (LocalStorage)
 let fakeUsersDb = {};
 let currentId = 1;
+
 
 //Схемы
 const registerSchema = Joi.object({
@@ -35,7 +38,8 @@ const updateProfileSchema = Joi.object({
     email: Joi.string().email().required()
 });
 
-//Authm middleware
+
+//Auth middleware
 const authMiddleware = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -53,6 +57,7 @@ const authMiddleware = (req, res, next) => {
     });
 };
 
+
 //Utils
 const generateToken = (user) => {
     return jwt.sign(
@@ -66,23 +71,80 @@ const generateToken = (user) => {
     );
 };
 
+const hashPassword = async (password) => {
+    return await bcrypt.hash(password, 12);
+};
+
+const comparePassword = async (password, hash) => {
+    return await bcrypt.compare(password, hash);
+};
+
+
 // Routes
+
+//Register
+app.post('/register', async (req, res) => {
+    try{
+        //Data validation
+        const {error, value} = registerSchema.validate(req.body);
+        if (error) {
+            return res.status(400).json({
+                error: 'Invalid data',
+                details: error.details.map(d => d.message)
+            });
+        }
+
+        const { email, password, name } = value;
+
+        //Existing user check
+        const existingUser = users.find(u => u.email === email);
+        if (existingUser) {
+            return res.status(409).json({
+                error: 'User already exists',
+                details: ['User with email ' + email + ' already exists']
+            });
+        }
+
+        //Hash password
+        const hashedPassword = await hashPassword(password);
+
+        //Create user
+        const user = {
+            id: uuidv4(),
+            email,
+            passwordHash: hashedPassword,
+            name,
+            roles: ['user'],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        users.push(user);
+
+        //Token generation
+        const token = generateToken(user);
+
+        //Response without password
+        const { passwordHash: _, ...userWithoutPassword } = user;
+
+        res.status(201).json({
+            success: true,
+            message: 'User registered successfully',
+            user: userWithoutPassword,
+            token
+        });
+
+    } catch (error) {
+        console.error('Registration error:', error);
+        res.status(500).json({ 
+            error: 'Internal server error during registration' 
+        });
+    }
+});
+
 app.get('/users', (req, res) => {
     const users = Object.values(fakeUsersDb);
     res.json(users);
-});
-
-app.post('/users', (req, res) => {
-    const userData = req.body;
-    const userId = currentId++;
-
-    const newUser = {
-        id: userId,
-        ...userData
-    };
-
-    fakeUsersDb[userId] = newUser;
-    res.status(201).json(newUser);
 });
 
 app.get('/users/health', (req, res) => {
