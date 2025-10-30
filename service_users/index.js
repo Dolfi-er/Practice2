@@ -142,6 +142,59 @@ app.post('/register', async (req, res) => {
     }
 });
 
+//Login
+app.post('/login', async (req, res) => {
+  try {
+    //Data validation
+    const { error, value } = loginSchema.validate(req.body);
+    if (error) {
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        details: error.details.map(d => d.message) 
+      });
+    }
+
+    const { email, password } = value;
+
+    // Find user by email
+    const user = users.find(user => user.email === email);
+    if (!user) {
+      return res.status(401).json({ 
+        error: 'Authentication failed',
+        message: 'Invalid email or password' 
+      });
+    }
+
+    // Password validation
+    const isPasswordValid = await comparePassword(password, user.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ 
+        error: 'Authentication failed',
+        message: 'Invalid email or password' 
+      });
+    }
+
+    // Token generation
+    const token = generateToken(user);
+
+    //Response without password
+    const { passwordHash, ...userWithoutPassword } = user;
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      user: userWithoutPassword,
+      token
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error during login' 
+    });
+  }
+});
+
 app.get('/users', (req, res) => {
     const users = Object.values(fakeUsersDb);
     res.json(users);
