@@ -8,6 +8,23 @@ const PORT = process.env.PORT || 8000;
 app.use(cors());
 app.use(express.json());
 
+//Схемы
+const registerSchema = Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().min(4).required(),
+    name: Joi.string().min(2).max(50).required()
+});
+
+const loginSchema = Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().required()
+});
+
+const updateProfileSchema = Joi.object({
+    name: Joi.string().min(2).max(50).required(),
+    email: Joi.string().email().required()
+});
+
 // Имитация базы данных в памяти (LocalStorage)
 let fakeUsersDb = {};
 let currentId = 1;
