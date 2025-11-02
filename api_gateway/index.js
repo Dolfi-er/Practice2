@@ -277,6 +277,52 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Создание заказа (с аутентификацией)
+app.post('/orders', async (req, res) => {
+    try {
+        const order = await ordersCircuit.fire(`${ORDERS_SERVICE_URL}/orders`, {
+            method: 'POST',
+            data: req.body,
+            headers: {
+                'Authorization': req.headers['authorization']
+            }
+        });
+        res.status(201).json(order);
+    } catch (error) {
+        res.status(500).json({error: 'Internal server error'});
+    }
+});
+
+// Получение заказа (с аутентификацией)
+app.get('/orders/:orderId', async (req, res) => {
+    try {
+        const order = await ordersCircuit.fire(`${ORDERS_SERVICE_URL}/orders/${req.params.orderId}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': req.headers['authorization']
+            }
+        });
+        res.json(order);
+    } catch (error) {
+        res.status(500).json({error: 'Internal server error'});
+    }
+});
+
+// Список заказов пользователя
+app.get('/orders', async (req, res) => {
+    try {
+        const orders = await ordersCircuit.fire(`${ORDERS_SERVICE_URL}/orders`, {
+            method: 'GET',
+            headers: {
+                'Authorization': req.headers['authorization']
+            }
+        });
+        res.json(orders);
+    } catch (error) {
+        res.status(500).json({error: 'Internal server error'});
+    }
+});
+
 app.get('/status', (req, res) => {
     res.json({status: 'API Gateway is running'});
 });

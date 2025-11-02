@@ -316,6 +316,14 @@ app.put('/orders/:orderId/cancel', authenticateToken, checkOrderOwnership, (req,
     }
 });
 
+//Get order by ID for gateway
+app.get('/orders/:orderId', (req, res) => {
+    const order = orders.find(order => order.id === req.params.orderId);
+    if (!order) {
+        return res.status(404).json({ error: 'Order not found' });
+    }
+    res.json(order);
+});
 
 app.get('/orders/status', (req, res) => {
     res.json({status: 'Orders service is running'});
