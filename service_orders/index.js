@@ -236,6 +236,53 @@ app.get('/orders', authenticateToken, (req, res) => {
     }
 });
 
+// Update order status
+app.put('/orders/:orderId/status', authenticateToken, checkOrderOwnership, (req, res) => {
+    try {
+        // Data validation
+        const { error, value } = updateOrderStatusSchema.validate(req.body);
+        if (error) {
+            return res.status(400).json({
+                error: 'Validation failed',
+                details: error.details.map(d => d.message)
+            });
+        }
+
+        const { status } = value;
+        const order = req.order;
+
+        // Check status transition
+        const allowedStatusTransitions = {
+            [ORDER_STATUS.CREATED]: [ORDER_STATUS.IN_PROGRESS, ORDER_STATUS.CANCELLED],
+            [ORDER_STATUS.IN_PROGRESS]: [ORDER_STATUS.COMPLETED, ORDER_STATUS.CANCELLED],
+            [ORDER_STATUS.COMPLETED]: [],
+            [ORDER_STATUS.CANCELLED]: []
+        };
+
+        if (!allowedStatusTransitions[order.status].includes(status)) {
+            return res.status(400).json({
+                error: 'Invalid status transition',
+                message: `Cannot change status from ${order.status} to ${status}`
+            });
+        }
+
+        // Status update
+        order.status = status;
+        order.updatedAt = new Date().toISOString();
+
+        res.json({
+            success: true,
+            message: 'Order status updated successfully',
+            order
+        });
+
+    } catch (error) {
+        console.error('Order status update error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+
 app.get('/orders/status', (req, res) => {
     res.json({status: 'Orders service is running'});
 });
