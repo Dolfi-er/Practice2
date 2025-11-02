@@ -162,6 +162,80 @@ app.post('/orders', authenticateToken, async (req, res) => {
     }
 });
 
+// Get order by ID
+app.get('/orders/:orderId', authenticateToken, checkOrderOwnership, (req, res) => {
+    try {
+        res.json({
+            success: true,
+            order: req.order
+        });
+    } catch (error) {
+        console.error('Get order error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Current user orders list with pagination and sorting
+app.get('/orders', authenticateToken, (req, res) => {
+    try {
+        // Pag and sort params
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const sortBy = req.query.sortBy || 'createdAt';
+        const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
+        const statusFilter = req.query.status;
+
+        // Filter
+        let userOrders = orders.filter(order => {
+            // Admins see all orders, users - only their
+            if (req.user.roles.includes('admin')) {
+                return true;
+            }
+            return order.userId === req.user.userId;
+        });
+
+        // Status filter
+        if (statusFilter && Object.values(ORDER_STATUS).includes(statusFilter)) {
+            userOrders = userOrders.filter(order => order.status === statusFilter);
+        }
+
+        // Sort
+        userOrders.sort((a, b) => {
+            if (a[sortBy] < b[sortBy]) return -1 * sortOrder;
+            if (a[sortBy] > b[sortBy]) return 1 * sortOrder;
+            return 0;
+        });
+
+        // Pagination
+        const startIndex = (page - 1) * limit;
+        const endIndex = page * limit;
+
+        const paginatedOrders = userOrders.slice(startIndex, endIndex);
+
+        res.json({
+            success: true,
+            orders: paginatedOrders,
+            pagination: {
+                page,
+                limit,
+                total: userOrders.length,
+                totalPages: Math.ceil(userOrders.length / limit),
+                hasNext: endIndex < userOrders.length,
+                hasPrev: page > 1
+            },
+            filters: {
+                status: statusFilter,
+                sortBy,
+                sortOrder: sortOrder === 1 ? 'asc' : 'desc'
+            }
+        });
+
+    } catch (error) {
+        console.error('Orders list error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/orders/status', (req, res) => {
     res.json({status: 'Orders service is running'});
 });
@@ -172,29 +246,6 @@ app.get('/orders/health', (req, res) => {
         service: 'Orders Service',
         timestamp: new Date().toISOString()
     });
-});
-
-app.get('/orders/:orderId', (req, res) => {
-    const orderId = parseInt(req.params.orderId);
-    const order = orders[orderId];
-
-    if (!order) {
-        return res.status(404).json({error: 'Order not found'});
-    }
-
-    res.json(order);
-});
-
-app.get('/orders', (req, res) => {
-    let orders = Object.values(orders);
-
-    // Добавляем фильтрацию по userId если передан параметр
-    if (req.query.userId) {
-        const userId = parseInt(req.query.userId);
-        orders = orders.filter(order => order.userId === userId);
-    }
-
-    res.json(orders);
 });
 
 
