@@ -5,22 +5,17 @@ const { v4: uuidv4 } = require('uuid');
 const Joi = require('joi');
 const axios = require('axios');
 
-
 const app = express();
 const PORT = process.env.PORT || 8002;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret-key';
 const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://localhost:8001';
 
-
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-
 // Имитация базы данных в памяти (LocalStorage)
 let orders = [];
-let currentId = 1;
-
 
 // Статусы заказов
 const ORDER_STATUS = {
@@ -30,6 +25,80 @@ const ORDER_STATUS = {
     CANCELLED: 'cancelled'
 };
 
+// Доменные события
+const DOMAIN_EVENTS = {
+    ORDER_CREATED: 'order_created',
+    ORDER_STATUS_UPDATED: 'order_status_updated',
+    ORDER_CANCELLED: 'order_cancelled'
+};
+
+// Event Bus 
+class EventBus {
+    constructor() {
+        this.subscribers = [];
+        this.isConnected = false;
+    }
+
+    // Connect to message broker (placeholder for future implementation)
+    async connect() {
+        console.log('🔌 Connecting to message broker...');
+        
+        this.isConnected = true;
+        console.log('✅ EventBus connected (simulated)');
+    }
+
+    // Event publishing
+    async publish(eventType, eventData) {
+        const event = {
+            id: uuidv4(),
+            type: eventType,
+            timestamp: new Date().toISOString(),
+            data: eventData,
+            source: 'orders-service'
+        };
+
+        // Logging the event (in the future - sending to the broker)
+        console.log('📢 Domain Event:', JSON.stringify(event, null, 2));
+
+        // sending to broker in future
+        // await this.sendToBroker(event);
+
+        // Notify local subscribers
+        this.notifySubscribers(event);
+
+        return event;
+    }
+
+    // Subscribe to events
+    subscribe(callback) {
+        this.subscribers.push(callback);
+    }
+
+    // Notification of subscribers
+    notifySubscribers(event) {
+        this.subscribers.forEach(callback => {
+            try {
+                callback(event);
+            } catch (error) {
+                console.error('Error in event subscriber:', error);
+            }
+        });
+    }
+
+    // Placeholder for sending to the broker
+    async sendToBroker(event) {
+        // TODO: Реализовать подключение к реальному брокеру
+    }
+}
+
+// Инициализация EventBus
+const eventBus = new EventBus();
+eventBus.connect();
+
+// Подписка на события для логирования (пример подписчика)
+eventBus.subscribe((event) => {
+    console.log(`🎯 Event received: ${event.type} for order ${event.data.orderId}`);
+});
 
 // Schemas
 const createOrderSchema = Joi.object({
@@ -45,8 +114,6 @@ const createOrderSchema = Joi.object({
 const updateOrderStatusSchema = Joi.object({
     status: Joi.string().valid(...Object.values(ORDER_STATUS)).required()
 });
-
-
 
 // Auth middleware
 const authenticateToken = (req, res, next) => {
@@ -75,13 +142,13 @@ const checkOrderOwnership = (req, res, next) => {
         return res.status(404).json({ error: 'Order not found' });
     }
 
-    // Админы могут управлять любыми заказами
+    // Admins can manage any order
     if (req.user.roles.includes('admin')) {
         req.order = order;
         return next();
     }
 
-    // Пользователи могут управлять только своими заказами
+    // Users can only manage their own orders
     if (order.userId !== req.user.userId) {
         return res.status(403).json({ error: 'Access denied to this order' });
     }
@@ -89,7 +156,6 @@ const checkOrderOwnership = (req, res, next) => {
     req.order = order;
     next();
 };
-
 
 //Utils
 const calculateTotal = (items) => {
@@ -105,7 +171,6 @@ const checkUserExists = async (userId) => {
         return false;
     }
 };
-
 
 // Routes
 
@@ -147,6 +212,16 @@ app.post('/orders', authenticateToken, async (req, res) => {
         };
 
         orders.push(order);
+
+        // Publishing domain event
+        await eventBus.publish(DOMAIN_EVENTS.ORDER_CREATED, {
+            orderId: order.id,
+            userId: order.userId,
+            items: order.items,
+            total: order.total,
+            status: order.status,
+            createdAt: order.createdAt
+        });
 
         res.status(201).json({
             success: true,
@@ -237,7 +312,7 @@ app.get('/orders', authenticateToken, (req, res) => {
 });
 
 // Update order status
-app.put('/orders/:orderId/status', authenticateToken, checkOrderOwnership, (req, res) => {
+app.put('/orders/:orderId/status', authenticateToken, checkOrderOwnership, async (req, res) => {
     try {
         // Data validation
         const { error, value } = updateOrderStatusSchema.validate(req.body);
@@ -250,6 +325,7 @@ app.put('/orders/:orderId/status', authenticateToken, checkOrderOwnership, (req,
 
         const { status } = value;
         const order = req.order;
+        const oldStatus = order.status;
 
         // Check status transition
         const allowedStatusTransitions = {
@@ -270,6 +346,15 @@ app.put('/orders/:orderId/status', authenticateToken, checkOrderOwnership, (req,
         order.status = status;
         order.updatedAt = new Date().toISOString();
 
+        // Publishing domain event
+        await eventBus.publish(DOMAIN_EVENTS.ORDER_STATUS_UPDATED, {
+            orderId: order.id,
+            userId: order.userId,
+            oldStatus: oldStatus,
+            newStatus: status,
+            updatedAt: order.updatedAt
+        });
+
         res.json({
             success: true,
             message: 'Order status updated successfully',
@@ -283,9 +368,10 @@ app.put('/orders/:orderId/status', authenticateToken, checkOrderOwnership, (req,
 });
 
 // Cancel order
-app.put('/orders/:orderId/cancel', authenticateToken, checkOrderOwnership, (req, res) => {
+app.put('/orders/:orderId/cancel', authenticateToken, checkOrderOwnership, async (req, res) => {
     try {
         const order = req.order;
+        const oldStatus = order.status;
 
         // Posibility check
         if (order.status === ORDER_STATUS.COMPLETED) {
@@ -303,6 +389,14 @@ app.put('/orders/:orderId/cancel', authenticateToken, checkOrderOwnership, (req,
         // Cancellation
         order.status = ORDER_STATUS.CANCELLED;
         order.updatedAt = new Date().toISOString();
+
+        // Publishing domain event
+        await eventBus.publish(DOMAIN_EVENTS.ORDER_CANCELLED, {
+            orderId: order.id,
+            userId: order.userId,
+            oldStatus: oldStatus,
+            cancelledAt: order.updatedAt
+        });
 
         res.json({
             success: true,
@@ -333,12 +427,23 @@ app.get('/orders/health', (req, res) => {
     res.json({
         status: 'OK',
         service: 'Orders Service',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        eventBus: eventBus.isConnected ? 'connected' : 'disconnected'
     });
 });
 
+// Event bus status endpoint
+app.get('/orders/events/status', (req, res) => {
+    res.json({
+        eventBus: {
+            connected: eventBus.isConnected,
+            subscribers: eventBus.subscribers.length
+        }
+    });
+});
 
 // Start server
 app.listen(PORT, () => {
     console.log(`Orders service running on port ${PORT}`);
+    console.log('📢 Domain events system initialized');
 });
