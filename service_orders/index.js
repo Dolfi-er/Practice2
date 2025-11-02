@@ -108,6 +108,60 @@ const checkUserExists = async (userId) => {
 
 
 // Routes
+
+// New order
+app.post('/orders', authenticateToken, async (req, res) => {
+    try {
+        // Data validation
+        const { error, value } = createOrderSchema.validate(req.body);
+        if (error) {
+            return res.status(400).json({
+                error: 'Validation failed',
+                details: error.details.map(d => d.message)
+            });
+        }
+
+        const { items } = value;
+
+        // User existence check
+        const userExists = await checkUserExists(req.user.userId);
+        if (!userExists) {
+            return res.status(400).json({ error: 'User does not exist' });
+        }
+
+        // Total calculation
+        const total = calculateTotal(items);
+
+        // Order creation
+        const order = {
+            id: uuidv4(),
+            userId: req.user.userId,
+            items: items.map(item => ({
+                ...item,
+                subtotal: item.quantity * item.price
+            })),
+            status: ORDER_STATUS.CREATED,
+            total,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        orders.push(order);
+
+        res.status(201).json({
+            success: true,
+            message: 'Order created successfully',
+            order
+        });
+
+    } catch (error) {
+        console.error('Order creation error:', error);
+        res.status(500).json({
+            error: 'Internal server error during order creation'
+        });
+    }
+});
+
 app.get('/orders/status', (req, res) => {
     res.json({status: 'Orders service is running'});
 });
@@ -143,47 +197,6 @@ app.get('/orders', (req, res) => {
     res.json(orders);
 });
 
-app.post('/orders', (req, res) => {
-    const orderData = req.body;
-    const orderId = currentId++;
-
-    const newOrder = {
-        id: orderId,
-        ...orderData
-    };
-
-    orders[orderId] = newOrder;
-    res.status(201).json(newOrder);
-});
-
-app.put('/orders/:orderId', (req, res) => {
-    const orderId = parseInt(req.params.orderId);
-    const orderData = req.body;
-
-    if (!orders[orderId]) {
-        return res.status(404).json({error: 'Order not found'});
-    }
-
-    orders[orderId] = {
-        id: orderId,
-        ...orderData
-    };
-
-    res.json(orders[orderId]);
-});
-
-app.delete('/orders/:orderId', (req, res) => {
-    const orderId = parseInt(req.params.orderId);
-
-    if (!orders[orderId]) {
-        return res.status(404).json({error: 'Order not found'});
-    }
-
-    const deletedOrder = orders[orderId];
-    delete orders[orderId];
-
-    res.json({message: 'Order deleted', deletedOrder});
-});
 
 // Start server
 app.listen(PORT, () => {
