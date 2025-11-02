@@ -282,6 +282,40 @@ app.put('/orders/:orderId/status', authenticateToken, checkOrderOwnership, (req,
     }
 });
 
+// Cancel order
+app.put('/orders/:orderId/cancel', authenticateToken, checkOrderOwnership, (req, res) => {
+    try {
+        const order = req.order;
+
+        // Posibility check
+        if (order.status === ORDER_STATUS.COMPLETED) {
+            return res.status(400).json({
+                error: 'Cannot cancel completed order'
+            });
+        }
+
+        if (order.status === ORDER_STATUS.CANCELLED) {
+            return res.status(400).json({
+                error: 'Order is already cancelled'
+            });
+        }
+
+        // Cancellation
+        order.status = ORDER_STATUS.CANCELLED;
+        order.updatedAt = new Date().toISOString();
+
+        res.json({
+            success: true,
+            message: 'Order cancelled successfully',
+            order
+        });
+
+    } catch (error) {
+        console.error('Order cancellation error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 
 app.get('/orders/status', (req, res) => {
     res.json({status: 'Orders service is running'});
