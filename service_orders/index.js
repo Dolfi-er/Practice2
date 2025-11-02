@@ -7,9 +7,9 @@ const axios = require('axios');
 
 
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 8002;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret-key';
-const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://service_users:8000';
+const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://localhost:8001';
 
 
 // Middleware
