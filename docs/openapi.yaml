@@ -4,9 +4,6 @@ info:
   description: API for microservices e-commerce
 
   version: 1.0.0
-  contact:
-    name: API Support
-    email: support@example.com
 
 servers:
   - url: http://localhost:8000
