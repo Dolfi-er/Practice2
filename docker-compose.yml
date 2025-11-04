@@ -5,13 +5,19 @@ services:
       - "8000:8000"
     environment:
       - NODE_ENV=production
+      - USERS_SERVICE_URL=http://service_users:8001
+      - ORDERS_SERVICE_URL=http://service_orders:8002
     networks:
       - app-network
+    depends_on:
+      - service_users
+      - service_orders
 
   service_users:
     build: service_users
     environment:
       - NODE_ENV=production
+      - PORT=8001
     networks:
       - app-network
 
@@ -19,6 +25,7 @@ services:
     build: service_orders
     environment:
       - NODE_ENV=production
+      - PORT=8002
     networks:
       - app-network
 
