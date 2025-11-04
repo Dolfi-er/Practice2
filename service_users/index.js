@@ -39,12 +39,24 @@ const authenticateToken = (req, res, next) => {
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
-        return res.status(401).json({ error: 'Access token required' });
+        return res.status(401).json({
+            success: false,
+            error: {
+                code: 'UNAUTHORIZED',
+                message: 'Access token required'
+            }
+        });
     }
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) {
-            return res.status(403).json({ error: 'Invalid or expired token' });
+            return res.status(403).json({
+                success: false,
+                error: {
+                    code: 'INVALID_TOKEN',
+                    message: 'Invalid or expired token'
+                }
+            });
         }
         req.user = user;
         next();
@@ -54,7 +66,13 @@ const authenticateToken = (req, res, next) => {
 // Middleware для проверки роли администратора
 const requireAdmin = (req, res, next) => {
     if (!req.user.roles.includes('admin')) {
-        return res.status(403).json({ error: 'Admin access required' });
+        return res.status(403).json({
+            success: false,
+            error: {
+                code: 'FORBIDDEN',
+                message: 'Admin access required'
+            }
+        });
     }
     next();
 };
@@ -80,18 +98,40 @@ const comparePassword = async (password, hash) => {
     return await bcrypt.compare(password, hash);
 };
 
+// Форматирование успешного ответа
+const successResponse = (data, statusCode = 200) => {
+    return {
+        success: true,
+        data: data
+    };
+};
+
+// Форматирование ошибки
+const errorResponse = (code, message, statusCode = 400) => {
+    return {
+        success: false,
+        error: {
+            code: code,
+            message: message
+        }
+    };
+};
+
 // Routes
 
-// Register
-app.post('/users/register', async (req, res) => {
+// Register (публичный)
+app.post('/v1/users/register', async (req, res) => {
     try {
         // Data validation
         const { error, value } = registerSchema.validate(req.body);
         if (error) {
-            return res.status(400).json({
-                error: 'Invalid data',
-                details: error.details.map(d => d.message)
-            });
+            return res.status(400).json(
+                errorResponse(
+                    'VALIDATION_ERROR',
+                    'Invalid data',
+                    { details: error.details.map(d => d.message) }
+                )
+            );
         }
 
         const { email, password, name } = value;
@@ -99,10 +139,12 @@ app.post('/users/register', async (req, res) => {
         // Existing user check
         const existingUser = users.find(u => u.email === email);
         if (existingUser) {
-            return res.status(409).json({
-                error: 'User already exists',
-                details: ['User with email ' + email + ' already exists']
-            });
+            return res.status(409).json(
+                errorResponse(
+                    'USER_EXISTS',
+                    `User with email ${email} already exists`
+                )
+            );
         }
 
         // Hash password
@@ -127,31 +169,38 @@ app.post('/users/register', async (req, res) => {
         // Response without password
         const { passwordHash: _, ...userWithoutPassword } = user;
 
-        res.status(201).json({
-            success: true,
-            message: 'User registered successfully',
-            user: userWithoutPassword,
-            token
-        });
+        res.status(201).json(
+            successResponse({
+                message: 'User registered successfully',
+                user: userWithoutPassword,
+                token
+            })
+        );
 
     } catch (error) {
         console.error('Registration error:', error);
-        res.status(500).json({
-            error: 'Internal server error during registration'
-        });
+        res.status(500).json(
+            errorResponse(
+                'INTERNAL_ERROR',
+                'Internal server error during registration'
+            )
+        );
     }
 });
 
-// Login
-app.post('/users/login', async (req, res) => {
+// Login (публичный)
+app.post('/v1/users/login', async (req, res) => {
     try {
         // Data validation
         const { error, value } = loginSchema.validate(req.body);
         if (error) {
-            return res.status(400).json({
-                error: 'Validation failed',
-                details: error.details.map(d => d.message)
-            });
+            return res.status(400).json(
+                errorResponse(
+                    'VALIDATION_ERROR',
+                    'Validation failed',
+                    { details: error.details.map(d => d.message) }
+                )
+            );
         }
 
         const { email, password } = value;
@@ -159,19 +208,23 @@ app.post('/users/login', async (req, res) => {
         // Find user by email
         const user = users.find(user => user.email === email);
         if (!user) {
-            return res.status(401).json({
-                error: 'Authentication failed',
-                message: 'Invalid email or password'
-            });
+            return res.status(401).json(
+                errorResponse(
+                    'AUTH_FAILED',
+                    'Invalid email or password'
+                )
+            );
         }
 
         // Password validation
         const isPasswordValid = await comparePassword(password, user.passwordHash);
         if (!isPasswordValid) {
-            return res.status(401).json({
-                error: 'Authentication failed',
-                message: 'Invalid email or password'
-            });
+            return res.status(401).json(
+                errorResponse(
+                    'AUTH_FAILED',
+                    'Invalid email or password'
+                )
+            );
         }
 
         // Token generation
@@ -180,53 +233,65 @@ app.post('/users/login', async (req, res) => {
         // Response without password
         const { passwordHash, ...userWithoutPassword } = user;
 
-        res.json({
-            success: true,
-            message: 'Login successful',
-            user: userWithoutPassword,
-            token
-        });
+        res.json(
+            successResponse({
+                message: 'Login successful',
+                user: userWithoutPassword,
+                token
+            })
+        );
 
     } catch (error) {
         console.error('Login error:', error);
-        res.status(500).json({
-            error: 'Internal server error during login'
-        });
+        res.status(500).json(
+            errorResponse(
+                'INTERNAL_ERROR',
+                'Internal server error during login'
+            )
+        );
     }
 });
 
-// Get profile
-app.get('/users/me', authenticateToken, (req, res) => {
+// Get profile (защищенный)
+app.get('/v1/users/me', authenticateToken, (req, res) => {
     try {
         const user = users.find(user => user.id === req.user.userId);
         if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+            return res.status(404).json(
+                errorResponse('USER_NOT_FOUND', 'User not found')
+            );
         }
 
         const { passwordHash, ...userWithoutPassword } = user;
-        res.json(userWithoutPassword);
+        res.json(successResponse(userWithoutPassword));
 
     } catch (error) {
         console.error('Profile error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json(
+            errorResponse('INTERNAL_ERROR', 'Internal server error')
+        );
     }
 });
 
-// Update profile 
-app.put('/users/me', authenticateToken, async (req, res) => {
+// Update profile (защищенный)
+app.put('/v1/users/me', authenticateToken, async (req, res) => {
     try {
-        // Валидация входных данных
         const { error, value } = updateProfileSchema.validate(req.body);
         if (error) {
-            return res.status(400).json({
-                error: 'Validation failed',
-                details: error.details.map(d => d.message)
-            });
+            return res.status(400).json(
+                errorResponse(
+                    'VALIDATION_ERROR',
+                    'Validation failed',
+                    { details: error.details.map(d => d.message) }
+                )
+            );
         }
 
         const userIndex = users.findIndex(user => user.id === req.user.userId);
         if (userIndex === -1) {
-            return res.status(404).json({ error: 'User not found' });
+            return res.status(404).json(
+                errorResponse('USER_NOT_FOUND', 'User not found')
+            );
         }
 
         // Обновление полей
@@ -238,20 +303,23 @@ app.put('/users/me', authenticateToken, async (req, res) => {
 
         const { passwordHash, ...updatedUser } = users[userIndex];
 
-        res.json({
-            success: true,
-            message: 'Profile updated successfully',
-            user: updatedUser
-        });
+        res.json(
+            successResponse({
+                message: 'Profile updated successfully',
+                user: updatedUser
+            })
+        );
 
     } catch (error) {
         console.error('Profile update error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json(
+            errorResponse('INTERNAL_ERROR', 'Internal server error')
+        );
     }
 });
 
 // List users (admin only) 
-app.get('/users', authenticateToken, requireAdmin, (req, res) => {
+app.get('/v1/users', authenticateToken, requireAdmin, (req, res) => {
     try {
         // Pagination + filters params
         const page = parseInt(req.query.page) || 1;
@@ -286,45 +354,52 @@ app.get('/users', authenticateToken, requireAdmin, (req, res) => {
             return userWithoutPassword;
         });
 
-        res.json({
-            success: true,
-            users: usersWithoutPasswords,
-            pagination: {
-                page,
-                limit,
-                total: filteredUsers.length,
-                totalPages: Math.ceil(filteredUsers.length / limit)
-            }
-        });
+        res.json(
+            successResponse({
+                users: usersWithoutPasswords,
+                pagination: {
+                    page,
+                    limit,
+                    total: filteredUsers.length,
+                    totalPages: Math.ceil(filteredUsers.length / limit)
+                }
+            })
+        );
 
     } catch (error) {
         console.error('Users list error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json(
+            errorResponse('INTERNAL_ERROR', 'Internal server error')
+        );
     }
-});
-
-// Health check
-app.get('/users/health', (req, res) => {
-    res.json({
-        status: 'OK',
-        service: 'Users Service',
-        timestamp: new Date().toISOString()
-    });
-});
-
-app.get('/users/status', (req, res) => {
-    res.json({ status: 'Users service is running' });
 });
 
 // Получение пользователя по ID (для API Gateway)
-app.get('/users/:userId', (req, res) => {
+app.get('/v1/users/:userId', (req, res) => {
     const user = users.find(user => user.id === req.params.userId);
     if (!user) {
-        return res.status(404).json({ error: 'User not found' });
+        return res.status(404).json(
+            errorResponse('USER_NOT_FOUND', 'User not found')
+        );
     }
 
     const { passwordHash, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
+    res.json(successResponse(userWithoutPassword));
+});
+
+// Health check (публичный)
+app.get('/health', (req, res) => {
+    res.json(
+        successResponse({
+            status: 'OK',
+            service: 'Users Service',
+            timestamp: new Date().toISOString()
+        })
+    );
+});
+
+app.get('/status', (req, res) => {
+    res.json(successResponse({ status: 'Users service is running' }));
 });
 
 // Test admin creation
@@ -344,6 +419,13 @@ const createTestAdmin = async () => {
         console.log('Test admin created: admin@test.com / admin123');
     }
 };
+
+// 404 handler
+app.use('*', (req, res) => {
+    res.status(404).json(
+        errorResponse('ROUTE_NOT_FOUND', 'Route not found')
+    );
+});
 
 // Start server
 app.listen(PORT, '0.0.0.0', async () => {

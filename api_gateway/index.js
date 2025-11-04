@@ -19,9 +19,15 @@ app.use(express.json());
 
 // Rate limiting
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
-    message: 'Too many requests from this IP'
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: JSON.stringify({
+        success: false,
+        error: {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: 'Too many requests from this IP'
+        }
+    })
 });
 app.use(limiter);
 
@@ -34,21 +40,48 @@ app.use((req, res, next) => {
 
 // Auth middleware
 const authenticateToken = (req, res, next) => {
+    // Публичные пути - пропускаем без аутентификации
+    const publicPaths = [
+        '/v1/users/register',
+        '/v1/users/login',
+        '/health',
+        '/status'
+    ];
+    
+    if (publicPaths.some(path => req.path.startsWith(path))) {
+        return next();
+    }
+
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
-        return res.status(401).json({ error: 'Access token required' });
+        return res.status(401).json({
+            success: false,
+            error: {
+                code: 'UNAUTHORIZED',
+                message: 'Access token required'
+            }
+        });
     }
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) {
-            return res.status(403).json({ error: 'Invalid or expired token' });
+            return res.status(403).json({
+                success: false,
+                error: {
+                    code: 'INVALID_TOKEN',
+                    message: 'Invalid or expired token'
+                }
+            });
         }
         req.user = user;
         next();
     });
 };
+
+// Apply authentication to all routes
+app.use(authenticateToken);
 
 // Proxy request helper
 const proxyRequest = async (serviceUrl, req, res) => {
@@ -58,60 +91,83 @@ const proxyRequest = async (serviceUrl, req, res) => {
             'Content-Type': 'application/json'
         };
 
-        // Forward auth header if present
         if (req.headers['authorization']) {
             headers['Authorization'] = req.headers['authorization'];
         }
 
         const response = await axios({
             method: req.method,
-            url: `${serviceUrl}${req.originalUrl}`,
+            url: `${serviceUrl}${req.path}`,
             data: req.body,
             headers: headers,
-            validateStatus: (status) => status < 500 // Don't throw on 4xx errors
+            params: req.query,
+            validateStatus: (status) => status < 500
         });
 
-        // Forward the response
         res.status(response.status).json(response.data);
     } catch (error) {
         console.error(`Proxy error to ${serviceUrl}:`, error.message);
         
         if (error.response) {
-            // Service responded with error
             res.status(error.response.status).json(error.response.data);
         } else if (error.request) {
-            // Service unavailable
-            res.status(503).json({ error: 'Service temporarily unavailable' });
+            res.status(503).json({
+                success: false,
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: 'Service temporarily unavailable'
+                }
+            });
         } else {
-            res.status(500).json({ error: 'Internal gateway error' });
+            res.status(500).json({
+                success: false,
+                error: {
+                    code: 'GATEWAY_ERROR',
+                    message: 'Internal gateway error'
+                }
+            });
         }
     }
 };
 
-// Public routes (no authentication required)
-app.post('/users/register', (req, res) => proxyRequest(USERS_SERVICE_URL, req, res));
-app.post('/users/login', (req, res) => proxyRequest(USERS_SERVICE_URL, req, res));
+// Public routes (без аутентификации)
+app.post('/v1/users/register', (req, res) => proxyRequest(USERS_SERVICE_URL, req, res));
+app.post('/v1/users/login', (req, res) => proxyRequest(USERS_SERVICE_URL, req, res));
 
-// Health checks (public)
-app.get('/users/health', (req, res) => proxyRequest(USERS_SERVICE_URL, req, res));
-app.get('/orders/health', (req, res) => proxyRequest(ORDERS_SERVICE_URL, req, res));
-app.get('/status', (req, res) => {
-    res.json({ status: 'API Gateway is running' });
+// Health checks (публичные)
+app.get('/health', (req, res) => {
+    res.json({
+        success: true,
+        data: {
+            status: 'OK',
+            service: 'API Gateway',
+            timestamp: new Date().toISOString()
+        }
+    });
 });
 
-// Protected routes - require authentication
-app.use('/users', authenticateToken);
-app.use('/orders', authenticateToken);
+app.get('/status', (req, res) => {
+    res.json({
+        success: true,
+        data: { status: 'API Gateway is running' }
+    });
+});
 
-// Users service routes
-app.all('/users*', (req, res) => proxyRequest(USERS_SERVICE_URL, req, res));
+// Users service routes (защищенные)
+app.all('/v1/users*', (req, res) => proxyRequest(USERS_SERVICE_URL, req, res));
 
-// Orders service routes  
-app.all('/orders*', (req, res) => proxyRequest(ORDERS_SERVICE_URL, req, res));
+// Orders service routes (защищенные)  
+app.all('/v1/orders*', (req, res) => proxyRequest(ORDERS_SERVICE_URL, req, res));
 
-// 404 handler for undefined routes
+// 404 handler
 app.use('*', (req, res) => {
-    res.status(404).json({ error: 'Route not found' });
+    res.status(404).json({
+        success: false,
+        error: {
+            code: 'ROUTE_NOT_FOUND',
+            message: 'Route not found'
+        }
+    });
 });
 
 // Start server
