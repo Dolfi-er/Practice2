@@ -4,14 +4,49 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const Joi = require('joi');
+const pino = require('pino');
+const pinoHttp = require('pino-http');
 
 const app = express();
 const PORT = process.env.PORT || 8001;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret-key';
 
+// Logger configuration
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  formatters: {
+    level: (label) => {
+      return { level: label };
+    },
+    bindings: (bindings) => {
+      return {
+        pid: bindings.pid,
+        hostname: bindings.hostname,
+        service: 'users-service'
+      };
+    }
+  },
+  timestamp: pino.stdTimeFunctions.isoTime
+});
+
+// HTTP logger middleware
+const httpLogger = pinoHttp({
+  logger: logger,
+  genReqId: (req) => req.headers['x-request-id'] || uuidv4(),
+  customLogLevel: (req, res, err) => {
+    if (res.statusCode >= 400 && res.statusCode < 500) {
+      return 'warn';
+    } else if (res.statusCode >= 500) {
+      return 'error';
+    }
+    return 'info';
+  }
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(httpLogger);
 
 // Имитация базы данных в памяти
 let users = []; 
@@ -39,6 +74,7 @@ const authenticateToken = (req, res, next) => {
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) {
+        req.log.warn('Authentication failed: missing token');
         return res.status(401).json({
             success: false,
             error: {
@@ -50,6 +86,7 @@ const authenticateToken = (req, res, next) => {
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) {
+            req.log.warn({ err: err.message }, 'Authentication failed: invalid token');
             return res.status(403).json({
                 success: false,
                 error: {
@@ -59,6 +96,7 @@ const authenticateToken = (req, res, next) => {
             });
         }
         req.user = user;
+        req.log.info({ userId: user.userId }, 'User authenticated');
         next();
     });
 };
@@ -66,6 +104,7 @@ const authenticateToken = (req, res, next) => {
 // Middleware для проверки роли администратора
 const requireAdmin = (req, res, next) => {
     if (!req.user.roles.includes('admin')) {
+        req.log.warn({ userId: req.user.userId }, 'Admin access required');
         return res.status(403).json({
             success: false,
             error: {
@@ -107,13 +146,17 @@ const successResponse = (data, statusCode = 200) => {
 };
 
 // Форматирование ошибки
-const errorResponse = (code, message, statusCode = 400) => {
+const errorResponse = (code, message, details = null) => {
+    const error = {
+        code: code,
+        message: message
+    };
+    if (details) {
+        error.details = details;
+    }
     return {
         success: false,
-        error: {
-            code: code,
-            message: message
-        }
+        error: error
     };
 };
 
@@ -122,14 +165,17 @@ const errorResponse = (code, message, statusCode = 400) => {
 // Register (публичный)
 app.post('/v1/users/register', async (req, res) => {
     try {
+        req.log.debug({ body: req.body }, 'Registration attempt');
+
         // Data validation
         const { error, value } = registerSchema.validate(req.body);
         if (error) {
+            req.log.warn({ error: error.details }, 'Registration validation failed');
             return res.status(400).json(
                 errorResponse(
                     'VALIDATION_ERROR',
                     'Invalid data',
-                    { details: error.details.map(d => d.message) }
+                    error.details.map(d => d.message)
                 )
             );
         }
@@ -139,6 +185,7 @@ app.post('/v1/users/register', async (req, res) => {
         // Existing user check
         const existingUser = users.find(u => u.email === email);
         if (existingUser) {
+            req.log.warn({ email: email }, 'User already exists');
             return res.status(409).json(
                 errorResponse(
                     'USER_EXISTS',
@@ -169,6 +216,8 @@ app.post('/v1/users/register', async (req, res) => {
         // Response without password
         const { passwordHash: _, ...userWithoutPassword } = user;
 
+        req.log.info({ userId: user.id, email: user.email }, 'User registered successfully');
+
         res.status(201).json(
             successResponse({
                 message: 'User registered successfully',
@@ -178,7 +227,7 @@ app.post('/v1/users/register', async (req, res) => {
         );
 
     } catch (error) {
-        console.error('Registration error:', error);
+        req.log.error({ err: error }, 'Registration error');
         res.status(500).json(
             errorResponse(
                 'INTERNAL_ERROR',
@@ -191,14 +240,17 @@ app.post('/v1/users/register', async (req, res) => {
 // Login (публичный)
 app.post('/v1/users/login', async (req, res) => {
     try {
+        req.log.debug({ email: req.body.email }, 'Login attempt');
+
         // Data validation
         const { error, value } = loginSchema.validate(req.body);
         if (error) {
+            req.log.warn({ error: error.details }, 'Login validation failed');
             return res.status(400).json(
                 errorResponse(
                     'VALIDATION_ERROR',
                     'Validation failed',
-                    { details: error.details.map(d => d.message) }
+                    error.details.map(d => d.message)
                 )
             );
         }
@@ -208,6 +260,7 @@ app.post('/v1/users/login', async (req, res) => {
         // Find user by email
         const user = users.find(user => user.email === email);
         if (!user) {
+            req.log.warn({ email: email }, 'Login failed: user not found');
             return res.status(401).json(
                 errorResponse(
                     'AUTH_FAILED',
@@ -219,6 +272,7 @@ app.post('/v1/users/login', async (req, res) => {
         // Password validation
         const isPasswordValid = await comparePassword(password, user.passwordHash);
         if (!isPasswordValid) {
+            req.log.warn({ email: email }, 'Login failed: invalid password');
             return res.status(401).json(
                 errorResponse(
                     'AUTH_FAILED',
@@ -233,6 +287,8 @@ app.post('/v1/users/login', async (req, res) => {
         // Response without password
         const { passwordHash, ...userWithoutPassword } = user;
 
+        req.log.info({ userId: user.id, email: user.email }, 'User logged in successfully');
+
         res.json(
             successResponse({
                 message: 'Login successful',
@@ -242,7 +298,7 @@ app.post('/v1/users/login', async (req, res) => {
         );
 
     } catch (error) {
-        console.error('Login error:', error);
+        req.log.error({ err: error }, 'Login error');
         res.status(500).json(
             errorResponse(
                 'INTERNAL_ERROR',
@@ -257,16 +313,19 @@ app.get('/v1/users/me', authenticateToken, (req, res) => {
     try {
         const user = users.find(user => user.id === req.user.userId);
         if (!user) {
+            req.log.warn({ userId: req.user.userId }, 'User not found');
             return res.status(404).json(
                 errorResponse('USER_NOT_FOUND', 'User not found')
             );
         }
 
         const { passwordHash, ...userWithoutPassword } = user;
+        
+        req.log.debug({ userId: user.id }, 'Profile retrieved');
         res.json(successResponse(userWithoutPassword));
 
     } catch (error) {
-        console.error('Profile error:', error);
+        req.log.error({ err: error }, 'Profile error');
         res.status(500).json(
             errorResponse('INTERNAL_ERROR', 'Internal server error')
         );
@@ -276,19 +335,23 @@ app.get('/v1/users/me', authenticateToken, (req, res) => {
 // Update profile (защищенный)
 app.put('/v1/users/me', authenticateToken, async (req, res) => {
     try {
+        req.log.debug({ userId: req.user.userId, body: req.body }, 'Profile update attempt');
+
         const { error, value } = updateProfileSchema.validate(req.body);
         if (error) {
+            req.log.warn({ error: error.details }, 'Profile update validation failed');
             return res.status(400).json(
                 errorResponse(
                     'VALIDATION_ERROR',
                     'Validation failed',
-                    { details: error.details.map(d => d.message) }
+                    error.details.map(d => d.message)
                 )
             );
         }
 
         const userIndex = users.findIndex(user => user.id === req.user.userId);
         if (userIndex === -1) {
+            req.log.warn({ userId: req.user.userId }, 'User not found for update');
             return res.status(404).json(
                 errorResponse('USER_NOT_FOUND', 'User not found')
             );
@@ -303,6 +366,8 @@ app.put('/v1/users/me', authenticateToken, async (req, res) => {
 
         const { passwordHash, ...updatedUser } = users[userIndex];
 
+        req.log.info({ userId: req.user.userId }, 'Profile updated successfully');
+
         res.json(
             successResponse({
                 message: 'Profile updated successfully',
@@ -311,7 +376,7 @@ app.put('/v1/users/me', authenticateToken, async (req, res) => {
         );
 
     } catch (error) {
-        console.error('Profile update error:', error);
+        req.log.error({ err: error }, 'Profile update error');
         res.status(500).json(
             errorResponse('INTERNAL_ERROR', 'Internal server error')
         );
@@ -321,6 +386,8 @@ app.put('/v1/users/me', authenticateToken, async (req, res) => {
 // List users (admin only) 
 app.get('/v1/users', authenticateToken, requireAdmin, (req, res) => {
     try {
+        req.log.debug({ adminId: req.user.userId }, 'Admin listing users');
+
         // Pagination + filters params
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
@@ -354,6 +421,11 @@ app.get('/v1/users', authenticateToken, requireAdmin, (req, res) => {
             return userWithoutPassword;
         });
 
+        req.log.debug({ 
+            adminId: req.user.userId, 
+            count: usersWithoutPasswords.length 
+        }, 'Users list retrieved');
+
         res.json(
             successResponse({
                 users: usersWithoutPasswords,
@@ -367,39 +439,60 @@ app.get('/v1/users', authenticateToken, requireAdmin, (req, res) => {
         );
 
     } catch (error) {
-        console.error('Users list error:', error);
+        req.log.error({ err: error }, 'Users list error');
         res.status(500).json(
             errorResponse('INTERNAL_ERROR', 'Internal server error')
         );
     }
 });
 
-// Получение пользователя по ID (для API Gateway)
+// Получение пользователя по ID (для внутреннего использования)
 app.get('/v1/users/:userId', (req, res) => {
     const user = users.find(user => user.id === req.params.userId);
     if (!user) {
+        req.log.warn({ userId: req.params.userId }, 'User not found for internal request');
         return res.status(404).json(
             errorResponse('USER_NOT_FOUND', 'User not found')
         );
     }
 
     const { passwordHash, ...userWithoutPassword } = user;
+    
+    req.log.debug({ userId: user.id }, 'User retrieved for internal request');
     res.json(successResponse(userWithoutPassword));
 });
 
 // Health check (публичный)
 app.get('/health', (req, res) => {
+    req.log.debug('Health check requested');
     res.json(
         successResponse({
             status: 'OK',
             service: 'Users Service',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            userCount: users.length
         })
     );
 });
 
 app.get('/status', (req, res) => {
     res.json(successResponse({ status: 'Users service is running' }));
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+    req.log.warn({ path: req.path }, 'Route not found');
+    res.status(404).json(
+        errorResponse('ROUTE_NOT_FOUND', 'Route not found')
+    );
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    req.log.error({ err: err }, 'Unhandled error');
+    res.status(500).json(
+        errorResponse('INTERNAL_ERROR', 'Internal server error')
+    );
 });
 
 // Test admin creation
@@ -416,19 +509,12 @@ const createTestAdmin = async () => {
             updatedAt: new Date().toISOString()
         };
         users.push(adminUser);
-        console.log('Test admin created: admin@test.com / admin123');
+        logger.info('Test admin created: admin@test.com / admin123');
     }
 };
-
-// 404 handler
-app.use('*', (req, res) => {
-    res.status(404).json(
-        errorResponse('ROUTE_NOT_FOUND', 'Route not found')
-    );
-});
 
 // Start server
 app.listen(PORT, '0.0.0.0', async () => {
     await createTestAdmin();
-    console.log(`Users service running on port ${PORT}`);
+    logger.info({ port: PORT }, 'Users service started');
 });
