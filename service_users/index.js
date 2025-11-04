@@ -116,6 +116,16 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
+// Middleware для внутренних сервисных запросов
+const allowInternalRequests = (req, res, next) => {
+    if (req.headers['x-internal-request'] === 'true') {
+        req.isInternalRequest = true;
+    }
+    next();
+};
+
+app.use(allowInternalRequests);
+
 // Утилиты
 const generateToken = (user) => {
     return jwt.sign(
@@ -446,20 +456,43 @@ app.get('/v1/users', authenticateToken, requireAdmin, (req, res) => {
     }
 });
 
-// Получение пользователя по ID (для внутреннего использования)
+// Get user by ID (для внутреннего использования)
 app.get('/v1/users/:userId', (req, res) => {
-    const user = users.find(user => user.id === req.params.userId);
-    if (!user) {
-        req.log.warn({ userId: req.params.userId }, 'User not found for internal request');
-        return res.status(404).json(
-            errorResponse('USER_NOT_FOUND', 'User not found')
+    try {
+        const userId = req.params.userId;
+        
+        // Разрешаем доступ только для внутренних запросов или аутентифицированных пользователей
+        if (!req.isInternalRequest && (!req.user || (req.user.userId !== userId && !req.user.roles.includes('admin')))) {
+            return res.status(403).json(
+                errorResponse('FORBIDDEN', 'Access denied')
+            );
+        }
+
+        const user = users.find(u => u.id === userId);
+        if (!user) {
+            return res.status(404).json(
+                errorResponse('USER_NOT_FOUND', 'User not found')
+            );
+        }
+
+        // Для внутренних запросов возвращаем полную информацию
+        const userData = req.isInternalRequest ? user : {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            roles: user.roles,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+        };
+
+        res.json(successResponse({ user: userData }));
+
+    } catch (error) {
+        req.log.error({ err: error }, 'Get user error');
+        res.status(500).json(
+            errorResponse('INTERNAL_ERROR', 'Internal server error')
         );
     }
-
-    const { passwordHash, ...userWithoutPassword } = user;
-    
-    req.log.debug({ userId: user.id }, 'User retrieved for internal request');
-    res.json(successResponse(userWithoutPassword));
 });
 
 // Health check (публичный)

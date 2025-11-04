@@ -10,7 +10,7 @@ const pinoHttp = require('pino-http');
 const app = express();
 const PORT = process.env.PORT || 8002;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret-key';
-const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://localhost:8001';
+const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://service_users:8001';
 
 // Logger configuration
 const logger = pino({
@@ -180,8 +180,17 @@ const checkUserExists = async (userId, req = null) => {
             req.log.debug({ userId: userId }, 'Checking user existence');
         }
         
-        const response = await axios.get(`${USERS_SERVICE_URL}/v1/users/${userId}`);
-        const exists = response.data && response.data.success;
+        // Используем внутренний endpoint для проверки пользователя
+        const response = await axios.get(`${USERS_SERVICE_URL}/v1/users/${userId}`, {
+            headers: {
+                'Content-Type': 'application/json',
+                // Добавляем внутренний токен или обходим аутентизацию для межсервисных вызовов
+                'x-internal-request': 'true'
+            },
+            timeout: 5000
+        });
+        
+        const exists = response.data && response.data.success && response.data.data && response.data.data.user;
         
         if (req && req.log) {
             if (!exists) {

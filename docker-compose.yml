@@ -25,6 +25,7 @@ services:
     build: service_orders
     environment:
       - NODE_ENV=production
+      - USERS_SERVICE_URL=http://service_users:8001
       - PORT=8002
     networks:
       - app-network
