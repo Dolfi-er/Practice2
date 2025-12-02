@@ -27,24 +27,24 @@
 
 ## 📁 Структура проекта
 .
-├── api_gateway/ # API Gateway сервис
-│ ├── Dockerfile
-│ ├── index.js
-│ └── package.json
-├── service_users/ # Сервис пользователей
-│ ├── Dockerfile
-│ ├── index.js
-│ └── package.json
-├── service_orders/ # Сервис заказов
-│ ├── Dockerfile
-│ ├── index.js
-│ └── package.json
-├── docs/ # Документация
-│ └── openapi.yaml # OpenAPI спецификация
-├── tests/ # Тесты
-│ └── test_api.sh # Скрипт для тестирования API
-├── docker-compose.yml # Docker Compose конфигурация
-└── README.md # Документация проекта
+├── api_gateway/ # API Gateway сервис  
+│ ├── Dockerfile  
+│ ├── index.js  
+│ └── package.json  
+├── service_users/ # Сервис пользователей  
+│ ├── Dockerfile  
+│ ├── index.js  
+│ └── package.json  
+├── service_orders/ # Сервис заказов  
+│ ├── Dockerfile  
+│ ├── index.js  
+│ └── package.json  
+├── docs/ # Документация  
+│ └── openapi.yaml # OpenAPI спецификация  
+├── tests/ # Тесты  
+│ └── test_api.sh # Скрипт для тестирования API  
+├── docker-compose.yml # Docker Compose конфигурация  
+└── README.md # Документация проекта  
 
 
 ## 🚀 Быстрый старт
@@ -56,14 +56,15 @@
 
 ### Запуск с помощью Docker Compose
 
-# Клонирование репозитория
+#### Клонирование репозитория
 git clone <repository-url>
 cd microservices-ecommerce
 
-# Сборка и запуск контейнеров
+#### Сборка и запуск контейнеров
 docker-compose up --build
 
-# Сервисы будут доступны по адресам:
-# API Gateway: http://localhost:8000
-# Users Service: http://localhost:8001
-# Orders Service: http://localhost:8002
+#### Сервисы будут доступны по адресам:
+ API Gateway: http://localhost:8000  
+ Users Service: http://localhost:8001  
+ Orders Service: http://localhost:8002  
+
